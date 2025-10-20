@@ -1,0 +1,34 @@
+# =====================================
+# Node.js .gitignore (Clean & Secure)
+# =====================================
+
+# Environment variables
+.env
+.env.*
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temp files
+*.tmp
+*.swp
+
+# Cache / Coverage
+.cache/
+coverage/
+

@@ -1,24 +1,3 @@
-
-// document.getElementById("fetchStops").addEventListener("click", fetchStops);
-
-// async function fetchStops() {
-//   try {
-//     const response = await fetch("http://localhost:3000/");
-//     const data = await response.json();
-//     document.getElementById("output").textContent = JSON.stringify(data, null, 2);
-//   } catch (error) {
-//     console.error("Error fetching stops:", error);
-//     document.getElementById("output").textContent = `Error: ${error.message}`;
-//   }
-// }
-
-
-// The code below is an experiment
-// The code above is the previous working version
-
-
-// script.js
-
 // === Config ===
 const API_BASE = "http://localhost:3000"; // Your Node server
 const DEFAULTS = {

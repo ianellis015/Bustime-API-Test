@@ -1,60 +1,91 @@
 const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
-
 require("dotenv").config();
-
 
 const app = express();
 app.use(cors());
 
-// Correct backend route seems to be 'predictions/bystop/bustime:1840'
-// TODO: Look into this
-
 const API_KEY = process.env.API_KEY;
-const BASE_URL = process.env.BASE_URL;
+const BASE_URL = process.env.BASE_URL; // e.g. https://rt.scmetro.org/bustime/api/v3
 
-// Function to fetch all routes
-async function getAllStops() {
-  try {
-    // Step 1: Get all routes
-    const routesResponse = await axios.get(`${BASE_URL}/getroutes`, {
-      params: { key: API_KEY, format: "json" },
-    });
+// Normalize one Bustime prediction object -> your shape
+function normalizePrediction(p) {
+  const toISO = (ymdHm) => {
+    if (!ymdHm || typeof ymdHm !== "string") return null;
 
-    const routes = routesResponse.data["bustime-response"].routes;
-    let allStops = [];
+    // Accept formats like:
+    //  - 20250130 14:05
+    //  - 20250130 14:05:27
+    //  - 20250130T1405 (rare)
+    //  - 20250130 1405 (API quirks)
+    // Normalize by extracting digits and optional separators.
+    const m = ymdHm.match(
+      /^(\d{4})(\d{2})(\d{2})[ T]?(\d{2}):?(\d{2})(?::?(\d{2}))?$/
+    );
+    if (!m) return null; // don't throw; just return null
 
-    // Step 2: Iterate over each route to get directions
-    for (let route of routes) {
-      const directionsResponse = await axios.get(`${BASE_URL}/getdirections`, {
-        params: { key: API_KEY, rt: route.rt, format: "json" },
-      });
+    const [, y, mo, d, h, mi, s = "00"] = m;
 
-      const directions = directionsResponse.data["bustime-response"].directions;
+    // Construct a Date safely. Use Date.UTC to avoid local-time DST surprises.
+    const dt = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)));
+    if (isNaN(dt.getTime())) return null; // still guard against bad input
 
-      // Step 3: Iterate over each direction to get stops
-      for (let direction of directions) {
-        const stopsResponse = await axios.get(`${BASE_URL}/getstops`, {
-          params: { key: API_KEY, rt: route.rt, dir: direction.id, format: "json" },
-        });
+    return dt.toISOString();
+  };
 
-        const stops = stopsResponse.data["bustime-response"].stops;
-        allStops = allStops.concat(stops);
-      }
-    }
-
-    return allStops;
-  } catch (error) {
-    console.error("Error fetching stops:", error.message);
-    return [];
-  }
+  return {
+    timestamp: toISO(p.tmstmp),
+    type: p.typ,                     // "A" = arrival prediction
+    stopName: p.stpnm,
+    stopId: p.stpid,
+    vehicleId: p.vid,
+    distanceToStopMeters: p.dstp ? Number(p.dstp) : null,
+    route: p.rt,
+    routePublic: p.rtdd,
+    direction: p.rtdir,
+    headsign: p.des,
+    predictedArrival: toISO(p.prdtm),
+    countdownMin: p.prdctdn !== undefined ? Number(p.prdctdn) : null,
+    delayed: p.dly === "true" || p.dly === true,
+    tripId: p.tatripid,
+    blockId: p.tablockid,
+    serviceDate: p.stsd || null,
+    // Keep raw in case you need anything else later:
+    _raw: p
+  };
 }
 
-// Endpoint to fetch all stops
-app.get("/allstops", async (req, res) => {
-  const stops = await getAllStops();
-  res.json(stops);
+// GET /predictions?stpid=1839,1840&rt=1,2,55,73&top=4
+app.get("/predictions", async (req, res) => {
+  try {
+    const { stpid, rt, top } = req.query;
+
+    const resp = await axios.get(`${BASE_URL}/getpredictions`, {
+      params: {
+        key: API_KEY,
+        stpid,            // comma-separated string is fine
+        rt,               // comma-separated string is fine
+        top,              // optional
+        format: "json"    // 👈 ask for JSON (no XML parsing needed)
+      },
+      timeout: 10_000
+    });
+
+    const body = resp.data?.["bustime-response"] || {};
+    const preds = Array.isArray(body.prd) ? body.prd : [];
+
+    // If the API returns errors (e.g., bad stop IDs), surface them
+    if (body.error) {
+      return res.status(400).json({ ok: false, error: body.error });
+    }
+
+    const normalized = preds.map(normalizePrediction);
+    return res.json({ ok: true, count: normalized.length, data: normalized });
+  } catch (err) {
+    console.error("getpredictions failed:", err.message);
+    return res.status(502).json({ ok: false, error: "Upstream error", detail: err.message });
+  }
 });
 
 app.listen(3000, () => console.log("Server running on port 3000"));
